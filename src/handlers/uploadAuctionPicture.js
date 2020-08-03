@@ -3,20 +3,28 @@ import httpErrorHandler from '@middy/http-error-handler';
 import createError from 'http-errors';
 import { getAuctionById } from './getAuction';
 import { uploadPictureToS3 } from '../lib/uploadPictureToS3';
-import { updatePictureUrl } from '../lib/updatePictureUrl';
+import { setAuctionPictureUrl } from '../lib/setAuctionPictureUrl';
 export async function uploadAuctionPicture(event) {
   const { id } = event.pathParameters;
+  const { email } = event.requestContext.authorizer;
+
   const auction = await getAuctionById(id);
   if (!auction) {
     throw new createError.NotFound(`Auction id ${id} not found`);
   }
+
+  if (email !== auction.seller) {
+    throw new createError.Forbidden(`You are not the auction seller!`);
+  }
+
   const base64 = event.body.replace(/^data:image\/\w+;base64,/, '');
   const buffer = Buffer.from(base64, 'base64');
 
+  let updatedAuction;
   try {
     const pictureUrl = await uploadPictureToS3(auction.id + '.jpg', buffer);
     console.log(`Picture URL: ${pictureUrl}`);
-    await updatePictureUrl(id, pictureUrl);
+    updatedAuction = await setAuctionPictureUrl(id, pictureUrl);
   } catch (e) {
     console.error(e);
     throw new createError.InternalServerError(e);
@@ -24,7 +32,7 @@ export async function uploadAuctionPicture(event) {
 
   return {
     statusCode: 200,
-    body: JSON.stringify({ message: 'OK' }),
+    body: JSON.stringify(updatedAuction),
   };
 }
 
